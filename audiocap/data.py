@@ -48,20 +48,18 @@ class AudioFolder:
     caption_columns: list[str]
     tokenizer: transformers.WhisperTokenizer
     feature_extractor: transformers.WhisperFeatureExtractor
+    meta: pd.DataFrame = dataclasses.field(init=True)
     handle_multiple_captions: Literal["explode", "keep_first"] | None = None
     prepare_caption: Callable | None = None
     augment_config: audiocap.augment.AugmentConfig | None = None
     shuffle_buffer_size: int = 20
     prefetch: int = 10
-    metadata_path: str | None = None
     drop_audio_array: bool = True
     sample_n: int | None = None
     seed: int | None = None
     load_as_iterable: bool = True
-    create_metadata: bool = True
     task: str = "tags"
 
-    meta: pd.DataFrame = dataclasses.field(init=False)
     pipe: dp.iter.IterDataPipe | dp.map.MapDataPipe = dataclasses.field(init=False)
     augmenter: audiocap.augment.Augmenter | None = dataclasses.field(init=False)
 
@@ -72,11 +70,8 @@ class AudioFolder:
                 "Please specify how to handle them using `handle_multiple_captions`."
             )
 
-        if not self.metadata_path.exists():
-            print("Metadata file not found. Please create it manually.")
-            sys.exit(1)
-
-        self.meta = pd.read_json(self.metadata_path, lines=True)
+        if self.meta.empty:
+            raise ValueError("Metadata not found.")
 
         if self.sample_n is not None:
             self.meta = self.meta.sample(n=self.sample_n, random_state=self.seed)
@@ -207,19 +202,17 @@ class EncodedFolder:
     encoded_base_path: str | None
     caption_columns: list[str]
     tokenizer: transformers.WhisperTokenizer
+    meta: pd.DataFrame = dataclasses.field(init=True)
     handle_multiple_captions: Literal["explode", "keep_first"] | None = None
     prepare_caption: Callable | None = None
     shuffle_buffer_size: int = 20
     prefetch: int = 10
-    metadata_path: str | None = None
     drop_audio_array: bool = True
     sample_n: int | None = None
     seed: int | None = None
     load_as_iterable: bool = True
     create_metadata: bool = True
     task: str = "tags"
-
-    meta: pd.DataFrame = dataclasses.field(init=False)
     pipe: dp.iter.IterDataPipe | dp.map.MapDataPipe = dataclasses.field(init=False)
 
     def __post_init__(self):
@@ -229,11 +222,8 @@ class EncodedFolder:
                 "Please specify how to handle them using `handle_multiple_captions`."
             )
 
-        if not self.metadata_path.exists():
-            print("Metadata file not found. Please create it manually.")
-            sys.exit(1)
-
-        self.meta = pd.read_json(self.metadata_path, lines=True)
+        if self.meta.empty:
+            raise ValueError("Metadata not found.")
 
         if self.sample_n is not None:
             self.meta = self.meta.sample(n=self.sample_n, random_state=self.seed)
@@ -426,9 +416,7 @@ def load_audios_for_prediction(
 
 
 def make_audiofolder(
-    train_metadata: pathlib.Path | str,
-    val_metadata: pathlib.Path | str,
-    test_metadata: pathlib.Path | str,
+    metadata: pathlib.Path | str,
     tokenizer: transformers.WhisperTokenizer,
     feature_extractor: transformers.WhisperFeatureExtractor,
     augment_config: audiocap.augment.AugmentConfig,
@@ -442,6 +430,16 @@ def make_audiofolder(
 
     ds = {}
 
+    meta = pd.read_json(metadata, lines=True)
+
+    # retrieve 500 samples for validation and 100 for test; then remove them from the training set
+    val_metadata = meta.sample(n=500, random_state=seed)
+    meta = meta.drop(val_metadata.index)
+    test_metadata = meta.sample(n=100, random_state=seed)
+    meta = meta.drop(test_metadata.index)
+    # train_metadata is the rest
+    train_metadata = meta
+
     if not encoded:
 
         common_args = dict(
@@ -453,7 +451,7 @@ def make_audiofolder(
         )
 
         ds["train"] = AudioFolder(
-            metadata_path=train_metadata,
+            meta=train_metadata,
             handle_multiple_captions="explode",
             shuffle=True,
             augment_config=augment_config,
@@ -462,7 +460,7 @@ def make_audiofolder(
         )
 
         ds["train_mini"] = AudioFolder(
-            metadata_path=train_metadata,
+            meta=train_metadata,
             handle_multiple_captions="keep_first",
             shuffle=False,
             augment_config=augment_config,
@@ -475,7 +473,7 @@ def make_audiofolder(
         )
 
         ds["val"] = AudioFolder(
-            metadata_path=val_metadata,
+            meta=val_metadata,
             handle_multiple_captions="keep_first",
             shuffle=False,
             augment_config=None,
@@ -486,7 +484,7 @@ def make_audiofolder(
         )
 
         ds["val_mini"] = AudioFolder(
-            metadata_path=val_metadata,
+            meta=val_metadata,
             handle_multiple_captions="keep_first",
             shuffle=False,
             augment_config=None,
@@ -499,7 +497,7 @@ def make_audiofolder(
         )
 
         ds["test"] = AudioFolder(
-            metadata_path=test_metadata,
+            meta=test_metadata,
             handle_multiple_captions="keep_first",
             shuffle=False,
             augment_config=None,
@@ -517,7 +515,7 @@ def make_audiofolder(
         )
 
         ds["train"] = EncodedFolder(
-            metadata_path=train_metadata,
+            meta=train_metadata,
             handle_multiple_captions="explode",
             shuffle=True,
             task=task,
@@ -525,7 +523,7 @@ def make_audiofolder(
         )
 
         ds["train_mini"] = EncodedFolder(
-            metadata_path=train_metadata,
+            meta=train_metadata,
             handle_multiple_captions="keep_first",
             shuffle=False,
             sample_n=train_mini_size,
@@ -536,7 +534,7 @@ def make_audiofolder(
         )
 
         ds["val"] = EncodedFolder(
-            metadata_path=val_metadata,
+            meta=val_metadata,
             handle_multiple_captions="keep_first",
             shuffle=False,
             sample_n=None,
@@ -546,7 +544,7 @@ def make_audiofolder(
         )
 
         ds["val_mini"] = EncodedFolder(
-            metadata_path=val_metadata,
+            meta=val_metadata,
             handle_multiple_captions="keep_first",
             shuffle=False,
             sample_n=val_mini_size,
@@ -557,7 +555,7 @@ def make_audiofolder(
         )
 
         ds["test"] = EncodedFolder(
-            metadata_path=test_metadata,
+            meta=test_metadata,
             handle_multiple_captions="keep_first",
             shuffle=False,
             task=task,
@@ -567,9 +565,7 @@ def make_audiofolder(
 
 
 def load_dataset_mixture(
-    train_metadata: pathlib.Path | str,
-    val_metadata: pathlib.Path | str,
-    test_metadata: pathlib.Path | str,
+    metadata: pathlib.Path | str,
     encoded: bool | False,
     encoded_base_path: str | None,
     log_preds_num_train: int,
@@ -583,9 +579,7 @@ def load_dataset_mixture(
 
     audiofolders.append(
         audiocap.data.make_audiofolder(
-            train_metadata=train_metadata,
-            val_metadata=val_metadata,
-            test_metadata=test_metadata,
+            metadata=metadata,
             tokenizer=tokenizer,
             feature_extractor=feature_extractor,
             augment_config=augment_config,

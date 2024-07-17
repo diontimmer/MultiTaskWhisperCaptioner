@@ -1,9 +1,8 @@
 import numpy as np
-import torchaudio
 import torch
 
 from transformers import WhisperFeatureExtractor, WhisperTokenizer
-from typing import Tuple
+from typing import Tuple, List
 
 
 class PrepareLabels:
@@ -12,7 +11,7 @@ class PrepareLabels:
     def __init__(self, tokenizer: WhisperTokenizer) -> None:
         self.tokenizer = tokenizer
 
-    def __call__(self, prefix: str, caption: str) -> Tuple[list[int], list[int]]:
+    def __call__(self, prefix: str, caption: str) -> Tuple[List[int], List[int]]:
         forced_ac_decoder_ids = self.tokenizer(
             "", text_target=prefix, add_special_tokens=False
         ).labels

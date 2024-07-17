@@ -10,16 +10,12 @@ import torch
 import typer
 import yaml
 import peft
-import torchdata.datapipes as dp
 
 import audiocap.metrics
 import audiocap.data
 import audiocap.callbacks
 import audiocap.models
 import audiocap.augment
-
-from typing import List
-
 
 app = typer.Typer(pretty_exceptions_enable=False)
 
@@ -39,20 +35,6 @@ def main(
         file_okay=True,
         readable=True,
         help="Path to the training metadata file",
-    ),
-    val_file: pathlib.Path = typer.Option(
-        ...,
-        dir_okay=False,
-        file_okay=True,
-        readable=True,
-        help="Path to the validation metadata file",
-    ),
-    test_file: Optional[pathlib.Path] = typer.Option(
-        None,
-        dir_okay=False,
-        file_okay=True,
-        readable=True,
-        help="Path to the test metadata file",
     ),
     training_config: pathlib.Path = typer.Option(
         ...,
@@ -173,13 +155,8 @@ def main(
         f"Number of trained parameters: {tuned_params}/{total_params} = {tuned_params/total_params*100:.2f}%"
     )
 
-    if test_file is None:
-        val_file = val_file
-
     dataset, audiofolders, ds_val_alternatives = audiocap.data.load_dataset_mixture(
-        train_metadata=train_file,
-        val_metadata=val_file,
-        test_metadata=test_file,
+        metadata=train_file,
         log_preds_num_train=log_preds_num_train,
         log_preds_num_valid=log_preds_num_valid,
         tokenizer=tokenizer,

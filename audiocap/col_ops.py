@@ -1,8 +1,8 @@
-from typing import Callable, Union, Tuple
+from typing import Callable, Union, Tuple, List, Dict
 
 
 def set_cols(
-    colname: Union[str, Tuple[str, ...], list[str]], func: Callable
+    colname: Union[str, Tuple[str, ...], List[str]], func: Callable
 ) -> Callable:
     """Set column(s) in a dictionary using a provided function."""
 
@@ -18,7 +18,7 @@ def set_cols(
     return _func
 
 
-def del_cols(*args: Union[str, Tuple[str, ...], list[str]]) -> Callable:
+def del_cols(*args: Union[str, Tuple[str, ...], List[str]]) -> Callable:
     """Delete column(s) from a dictionary."""
     colnames = [
         col
@@ -32,7 +32,7 @@ def del_cols(*args: Union[str, Tuple[str, ...], list[str]]) -> Callable:
     return _func
 
 
-def rename_col(mapper: dict[str, str]) -> Callable:
+def rename_col(mapper: Dict[str, str]) -> Callable:
     """Rename column(s) in a dictionary based on a provided mapping."""
 
     def _func(row: dict) -> dict:
@@ -44,10 +44,10 @@ def rename_col(mapper: dict[str, str]) -> Callable:
     return _func
 
 
-def explode_col(colnames: list[str], new_name: str, name_keep_in: str) -> Callable:
+def explode_col(colnames: List[str], new_name: str, name_keep_in: str) -> Callable:
     """Explode columns into multiple rows."""
 
-    def _func(row: dict) -> list[dict]:
+    def _func(row: dict) -> List[dict]:
         row = row.copy()
         caption_cols = {colname: row.pop(colname) for colname in colnames}
         return [
