@@ -2,19 +2,21 @@ hf_training_args:
   do_train: True
   do_eval: False
 
-  max_steps: 100_000
+  max_steps: 500
   optim: "adamw_torch"
-  learning_rate: 0.0001
-  warmup_steps: 500
+  learning_rate: 0.00001
+  warmup_steps: 100
 
   per_device_train_batch_size: 6
-  gradient_accumulation_steps: 5
+  gradient_accumulation_steps: 7
   per_device_eval_batch_size: 6
   eval_accumulation_steps: 1
 
   dataloader_num_workers: 16
   dataloader_pin_memory: True
   dataloader_drop_last: False
+  dataloader_persistent_workers: True
+  dataloader_prefetch_factor: 3
 
   logging_steps: 1
   report_to: "wandb"
@@ -29,11 +31,11 @@ hf_training_args:
   predict_with_generate: True # NEVER TOUCH THIS
   generation_num_beams: 1
   generation_max_length: 80
-  evaluation_strategy: "steps"
-  eval_steps: 1000
+  eval_strategy: "steps"
+  eval_steps: 500
 
   save_strategy: "steps"
-  save_steps: 1000
+  save_steps: 500
   save_total_limit: 5
 
 
@@ -52,13 +54,3 @@ logging:
   # these are per dataset
   log_preds_num_train: 8
   log_preds_num_valid: 32
-
-dataset_mix:
-  weights: 
-    clotho: 1.0
-    audioset: 0.0
-    audiocaps: 0.0
-  limit_val_split:
-    clotho: null
-    audioset: null
-    audiocaps: null

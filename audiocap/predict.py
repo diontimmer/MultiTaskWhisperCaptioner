@@ -59,6 +59,16 @@ def main(
     take_first_n: int = typer.Option(
         None, help="Take only the first n files (for debugging)"
     ),
+    encoded: bool = typer.Option(
+        False, help="Whether the data is already encoded with Whisper"
+    ),
+    encoded_base_path: pathlib.Path = typer.Option(
+        None,
+        dir_okay=True,
+        file_okay=False,
+        exists=True,
+        help="Base path to the encoded files",
+    ),
 ) -> None:
 
     for i in range(torch.cuda.device_count()):
@@ -101,13 +111,15 @@ def main(
     assert isinstance(tokenizer, transformers.WhisperTokenizer)
     assert isinstance(feature_extractor, transformers.WhisperFeatureExtractor)
 
-    ds, num_files = audiocap.data.load_audios_for_predition(
+    ds, num_files = audiocap.data.load_audios_for_prediction(
         src=data,
         tokenizer=tokenizer,
         feature_extractor=feature_extractor,
         recursive=recursive,
         take_n=take_first_n,
         task=task,
+        encoded=encoded,
+        encoded_base_path=encoded_base_path,
     )
 
     print(f"Found: {num_files} files")

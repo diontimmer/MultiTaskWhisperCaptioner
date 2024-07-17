@@ -72,6 +72,14 @@ def main(
         ...,
         help="Task to train the model on.",
     ),
+    encoded: bool = typer.Option(
+        False,
+        help="Whether the dataset is already encoded",
+    ),
+    encoded_base_path: Optional[pathlib.Path] = typer.Option(
+        None,
+        help="Base path to the encoded files",
+    ),
     wandb_group: Optional[str] = typer.Option(None, help="Wandb group"),
 ) -> None:
 
@@ -178,6 +186,8 @@ def main(
         feature_extractor=feature_extractor,
         augment_config=augment_config,
         task=task,
+        encoded=encoded,
+        encoded_base_path=encoded_base_path,
     )
 
     for ds in audiofolders:
@@ -240,6 +250,7 @@ def main(
         log_to_stdout=True,
         log_to_file=f"logs/preds_during_training/{wandb.run.name}/predictions_val.jsonl",
         generate_kwargs={"max_length": training_args_dict["generation_max_length"]},
+        encoded=encoded,
     )
 
     callback_log_train_preds = audiocap.callbacks.PredictionLogger(
@@ -252,6 +263,7 @@ def main(
         log_to_wandb=True,
         log_to_file=f"logs/preds_during_training/{wandb.run.name}/predictions_train.jsonl",
         generate_kwargs={"max_length": training_args_dict["generation_max_length"]},
+        encoded=encoded,
     )
 
     callback_peft_checkpoint = audiocap.callbacks.SavePeftModelCallback()

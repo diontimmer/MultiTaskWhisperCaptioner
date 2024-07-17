@@ -6,5 +6,7 @@ python \
     --val-file="/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_tags_val.jsonl" \
     --test-file="/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_tags_test.jsonl" \
     --training-config="/home/diont/audio-captioning/configs/finetune_small_config.yaml" \
-    --load-checkpoint="/home/diont/audio-captioning/checkpoints/curious-armadillo-5/checkpoint-3000" \
+    --load-checkpoint="/home/diont/audio-captioning/checkpoints/6theme500/checkpoint-500" \
+    --encoded \
+    --encoded-base-path="/data/datasets/pixabay_encoded" \
     --task="tags"

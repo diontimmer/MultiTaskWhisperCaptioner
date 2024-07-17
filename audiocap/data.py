@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import os
 import sys
 import pathlib
 import functools
 import dataclasses
 import collections
 import multiprocessing
-from typing import Literal, Callable
+from typing import Literal, Callable, Union, Tuple
 
 import librosa
 import pandas as pd
@@ -15,144 +16,30 @@ import torch
 import torch.utils.data
 import torchdata.datapipes as dp
 import transformers
-import json
 import audiocap
-import re
 import torchaudio
-
-
-def set_cols(colname: str | tuple[str, ...] | list[str], func: Callable) -> Callable:
-
-    def _func(row: dict):
-        row = row.copy()
-        if isinstance(colname, str):
-            row[colname] = func(row)
-        else:
-            for col, val in zip(colname, func(row)):
-                row[col] = val
-        return row
-
-    return _func
-
-
-def del_cols(*args: str | tuple[str, ...] | list[str]) -> Callable:
-    colnames = []
-    for arg in args:
-        if isinstance(arg, str):
-            colnames.append(arg)
-        elif isinstance(arg, tuple) or isinstance(arg, list):
-            colnames.extend(arg)
-
-    def _func(row: dict):
-        return {col: val for col, val in row.items() if col not in colnames}
-
-    return _func
-
-
-def rename_col(mapper: dict[str, str]) -> Callable:
-    def _func(row: dict):
-        row = row.copy()
-        for old_colname, new_colname in mapper.items():
-            row[new_colname] = row.pop(old_colname)
-        return row
-
-    return _func
-
-
-def explode_col(colnames: list[str], new_name: str, name_keep_in: str) -> Callable:
-    def _func(row: dict):
-        row = row.copy()
-        caption_cols = {colname: row.pop(colname) for colname in colnames}
-        return [
-            {**row, name_keep_in: colname, new_name: caption}
-            for colname, caption in caption_cols.items()
-        ]
-
-    return _func
-
-
-class PrepareLabels:
-    def __init__(self, tokenizer: transformers.WhisperTokenizer) -> None:
-        self.tokenizer = tokenizer
-
-    def __call__(self, prefix: str, caption: str) -> tuple[list[int], list[int]]:
-        forced_ac_decoder_ids = self.tokenizer(
-            "", text_target=prefix, add_special_tokens=False
-        ).labels
-        *fluff_tokens, eos = self.tokenizer(
-            "", text_target="", add_special_tokens=True
-        ).labels
-        labels = self.tokenizer(
-            "", text_target=caption, add_special_tokens=False
-        ).labels
-        labels = fluff_tokens + forced_ac_decoder_ids + labels + [eos]
-        return labels, forced_ac_decoder_ids
-
-
-class PreprocessAudio:
-    def __init__(self, feature_extractor: transformers.WhisperFeatureExtractor) -> None:
-        self.feature_extractor = feature_extractor
-        self.num_features = feature_extractor.feature_size
-
-    def __call__(self, audio_array: np.ndarray, sampling_rate: int) -> torch.Tensor:
-        features: torch.Tensor = self.feature_extractor(
-            audio_array, sampling_rate=sampling_rate, return_tensors="pt"
-        ).input_features
-        return features.reshape(self.num_features, -1)
-
-
-def librosa_load_safe(
-    path: pathlib.Path, sr: int | None, mono: bool
-) -> tuple[np.ndarray, int] | tuple[None, int | None]:
-    try:
-        audio, a_sr = torchaudio.load(path, num_frames=44100 * 10)
-        # resample to sr if needed
-        if sr != a_sr:
-            audio = torchaudio.transforms.Resample(sr, sr)(audio)
-
-        # make mono if needed
-        if audio.shape[0] > 1:
-            audio = audio.mean(dim=0, keepdim=True)
-        audio = audio.squeeze().numpy()
-        return audio, sr
-
-        audio, a_sr = librosa.load(path, sr=sr, mono=mono, duration=10)  # type: ignore
-        print(audio.shape)
-        return audio, a_sr
-    except Exception as e:
-        print(f"Error loading {path}: {e}", file=sys.stderr, flush=True)
-        return None, sr
+from col_ops import set_cols, del_cols, explode_col, rename_col
+from preprocessing import PrepareLabels, PreprocessAudio
 
 
 def create_prefix(task: str) -> str:
     return task + ": "
 
 
-def create_metadata_file(root_path):
-    metadata_file = root_path / "metadata.jsonl"
-    with open(metadata_file, "w") as f:
-        for path in root_path.glob("**/*.wav"):
-            # check if there's a corresponding .json file next to the .wav file
-            json_path = path.with_suffix(".json")
-            filename = str(path)
-            if json_path.exists():
-                with open(json_path, "r") as json_file:
-                    data = json.load(json_file)
-                    # skip if no text key in the JSON file
-                    if "text" not in data:
-                        continue
-                    prompt = data["text"]
-                    cleaned_prompt = re.sub(
-                        r"\b(type|tempo|key):[^,]*,?\s*", "", prompt
-                    )
-                    # Remove any trailing or leading whitespace and extra commas
-                    cleaned_prompt = cleaned_prompt.strip().rstrip(",")
-                    # Create a JSON Lines formatted string
-                    json_line = json.dumps(
-                        {"file_name": filename, "caption": cleaned_prompt}
-                    )
-                    # Write the JSON Lines formatted string to the file
-                    f.write(json_line + "\n")
+def load_and_process_audio(
+    path: pathlib.Path, sr: int | None, audio_seconds: int = 25, mono: bool = True
+) -> tuple[torch.Tensor, int]:
+    try:
+        audio, a_sr = torchaudio.load(path, num_frames=44100 * audio_seconds)
+        if sr != a_sr:
+            audio = torchaudio.transforms.Resample(a_sr, sr)(audio)
+        if mono and audio.shape[0] > 1:
+            audio = audio.mean(dim=0, keepdim=True)
+
+        return audio.squeeze(), sr
+    except Exception as e:
+        print(f"Error loading {path}: {e}", file=sys.stderr, flush=True)
+        return None, sr
 
 
 @dataclasses.dataclass
@@ -210,7 +97,7 @@ class AudioFolder:
         sr = self.feature_extractor.sampling_rate
 
         pipe: dp.iter.IterDataPipe
-        pipe = dp.iter.IterableWrapper(self.meta.to_dict("records"), deepcopy=False)  # type: ignore
+        pipe = dp.iter.IterableWrapper(self.meta.to_dict("records"), deepcopy=False)
 
         pipe = pipe.sharding_filter().map(
             set_cols("path", lambda row: row["file_name"])
@@ -220,7 +107,7 @@ class AudioFolder:
             pipe = pipe.map(
                 set_cols(
                     ("audio_array", "sampling_rate"),
-                    lambda row: librosa_load_safe(row["path"], sr=sr, mono=True),
+                    lambda row: load_and_process_audio(row["path"], sr),
                 )
             ).filter(lambda row: row["audio_array"] is not None)
         else:
@@ -228,7 +115,7 @@ class AudioFolder:
                 pipe.map(
                     set_cols(
                         ("audio_array", "sampling_rate"),
-                        lambda row: librosa_load_safe(row["path"], sr=None, mono=True),
+                        lambda row: load_and_process_audio(row["path"], sr),
                     )
                 )
                 .filter(lambda row: row["audio_array"] is not None)
@@ -243,11 +130,9 @@ class AudioFolder:
                 .map(
                     set_cols(
                         "audio_array",
-                        lambda row: librosa.resample(
-                            row["audio_array"],
-                            orig_sr=row["sampling_rate"],
-                            target_sr=sr,
-                        ),
+                        lambda row: torchaudio.transforms.Resample(
+                            orig_freq=row["sampling_rate"], new_freq=sr
+                        )(row["audio_array"]),
                     )
                 )
                 .map(set_cols("sampling_rate", lambda _: sr))
@@ -316,7 +201,140 @@ class AudioFolder:
         return {caption: alternatives for caption, *alternatives in caps.itertuples()}
 
 
-def load_audios_for_predition(
+@dataclasses.dataclass
+class EncodedFolder:
+    shuffle: bool
+    encoded_base_path: str | None
+    caption_columns: list[str]
+    tokenizer: transformers.WhisperTokenizer
+    handle_multiple_captions: Literal["explode", "keep_first"] | None = None
+    prepare_caption: Callable | None = None
+    shuffle_buffer_size: int = 20
+    prefetch: int = 10
+    metadata_path: str | None = None
+    drop_audio_array: bool = True
+    sample_n: int | None = None
+    seed: int | None = None
+    load_as_iterable: bool = True
+    create_metadata: bool = True
+    task: str = "tags"
+
+    meta: pd.DataFrame = dataclasses.field(init=False)
+    pipe: dp.iter.IterDataPipe | dp.map.MapDataPipe = dataclasses.field(init=False)
+
+    def __post_init__(self):
+        if len(self.caption_columns) > 1 and self.handle_multiple_captions is None:
+            raise ValueError(
+                "Multiple caption columns found. "
+                "Please specify how to handle them using `handle_multiple_captions`."
+            )
+
+        if not self.metadata_path.exists():
+            print("Metadata file not found. Please create it manually.")
+            sys.exit(1)
+
+        self.meta = pd.read_json(self.metadata_path, lines=True)
+
+        if self.sample_n is not None:
+            self.meta = self.meta.sample(n=self.sample_n, random_state=self.seed)
+
+        if self.shuffle:
+            self.meta = self.meta.sample(frac=1, random_state=self.seed)
+
+        self.init_pipe()
+
+    def init_pipe(self):
+        prepare_labels = PrepareLabels(self.tokenizer)
+
+        def load_encoded_features(row):
+            try:
+                filename = os.path.splitext(os.path.basename(row["file_name"]))[0]
+                encoded_filename = os.path.join(
+                    self.encoded_base_path, f"{filename}_whisper.npy"
+                )
+                encoded = np.load(encoded_filename)
+                encoded = encoded.squeeze()
+                return encoded
+            except Exception as e:
+                print(
+                    f"Error loading {os.path.splitext(os.path.basename(row['file_name']))[0]}: {e}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                return None
+
+        pipe: dp.iter.IterDataPipe
+        pipe = dp.iter.IterableWrapper(self.meta.to_dict("records"), deepcopy=False)
+
+        pipe = pipe.sharding_filter().map(
+            set_cols("path", lambda row: row["file_name"])
+        )
+
+        pipe = pipe.map(
+            set_cols("input_features", lambda row: load_encoded_features(row))
+        ).filter(lambda row: row["input_features"] is not None)
+
+        pipe = pipe.map(del_cols("path"))
+
+        prefix = create_prefix(self.task)
+
+        if self.drop_audio_array:
+            pipe = pipe.map(del_cols("audio_array"))
+
+        if self.handle_multiple_captions == "explode":
+            pipe = pipe.flatmap(
+                explode_col(self.caption_columns, "caption", "caption_colname")
+            )
+        else:
+            first_col, *rest_cols = self.caption_columns
+            pipe = (
+                pipe.map(rename_col({first_col: "caption"}))
+                .map(set_cols("caption_colname", lambda _: first_col))
+                .map(del_cols(rest_cols))
+            )
+
+        if self.prepare_caption is not None:
+            pipe = pipe.map(self.prepare_caption, input_col="caption")
+
+        if self.shuffle:
+            pipe = pipe.shuffle(buffer_size=self.shuffle_buffer_size)
+
+        pipe = pipe.map(set_cols("prefix", lambda row: prefix)).map(
+            set_cols(
+                ("labels", "forced_ac_decoder_ids"),
+                lambda row: prepare_labels(prefix, row["caption"]),
+            )
+        )
+
+        if self.load_as_iterable:
+            self.pipe = pipe.prefetch(self.prefetch)
+        else:
+            self.pipe = pipe.enumerate().to_map_datapipe()
+
+    def __len__(self):
+        if len(self.caption_columns) == 1:
+            return len(self.meta)
+        if self.handle_multiple_captions == "keep_first":
+            return len(self.meta)
+        if self.handle_multiple_captions == "explode":
+            return len(self.meta) * len(self.caption_columns)
+        raise ValueError("Invalid value for `handle_multiple_captions`.")
+
+    @functools.cached_property
+    def alternative_captions(self) -> dict[str, list[str]]:
+        if self.handle_multiple_captions == "explode":
+            raise NotImplementedError(
+                "Cannot return alternative captions when `handle_multiple_captions` is set to `flatten`."
+            )
+        caps = self.meta[self.caption_columns]
+        if self.prepare_caption is not None:
+            caps = caps.applymap(self.prepare_caption)
+        caps = caps.set_index(self.caption_columns[0], drop=False)
+        # this will drop values in case there are duplicates
+        return {caption: alternatives for caption, *alternatives in caps.itertuples()}
+
+
+def load_audios_for_prediction(
     src: pathlib.Path | str,
     tokenizer: transformers.WhisperTokenizer,
     feature_extractor: transformers.WhisperFeatureExtractor,
@@ -325,6 +343,8 @@ def load_audios_for_predition(
     suffixes: tuple[str, ...] = ("mp3", "wav"),
     take_n: int | None = None,
     prefetch: int = 10,
+    encoded: bool = False,
+    encoded_base_path: str | None = None,
 ) -> tuple[dp.iter.IterDataPipe, int]:
 
     src = pathlib.Path(src)
@@ -335,7 +355,7 @@ def load_audios_for_predition(
         paths = [
             path
             for path in src.glob("**/*")
-            if path.is_file() and path.suffix in suffixes
+            if path.is_file() and path.suffix.strip(".") in suffixes
         ]
     else:
         paths = [
@@ -358,21 +378,49 @@ def load_audios_for_predition(
 
     pipe: dp.iter.IterDataPipe
     pipe = dp.iter.IterableWrapper([{"path": path} for path in paths], deepcopy=False)
-    pipe = (
-        pipe.sharding_filter()
-        .map(set_cols("file_name", lambda x: pathlib.Path(x["path"]).name))
-        .map(
-            set_cols(
-                ("audio_array", "sampling_rate"),
-                lambda row: librosa_load_safe(row["path"], sr=sr, mono=True),
+
+    def load_encoded_features(path):
+        try:
+            filename = os.path.splitext(os.path.basename(path))[0]
+            encoded_filename = os.path.join(
+                encoded_base_path, f"{filename}_whisper.npy"
             )
+            encoded = np.load(encoded_filename)
+            return encoded
+        except Exception as e:
+            print(f"Error loading {encoded_filename}: {e}", file=sys.stderr, flush=True)
+            return None
+
+    if encoded:
+        pipe = (
+            pipe.sharding_filter()
+            .map(set_cols("file_name", lambda x: pathlib.Path(x["path"]).name))
+            .map(
+                set_cols(
+                    "input_features", lambda row: load_encoded_features(row["path"])
+                )
+            )
+            .filter(lambda row: row["input_features"] is not None)
+            .map(del_cols("path"))
+            .map(set_cols("forced_ac_decoder_ids", lambda _: forced_ac_decoder_ids))
+            .prefetch(prefetch)
         )
-        .map(del_cols("path"))
-        .filter(lambda row: row["audio_array"] is not None)
-        .map(extract_features, ["audio_array", "sampling_rate"], "input_features")
-        .map(set_cols("forced_ac_decoder_ids", lambda _: forced_ac_decoder_ids))
-        .prefetch(prefetch)
-    )
+    else:
+        pipe = (
+            pipe.sharding_filter()
+            .map(set_cols("file_name", lambda x: pathlib.Path(x["path"]).name))
+            .map(
+                set_cols(
+                    ("audio_array", "sampling_rate"),
+                    lambda row: load_and_process_audio(row["path"], sr=sr),
+                )
+            )
+            .map(del_cols("path"))
+            .filter(lambda row: row["audio_array"] is not None)
+            .map(extract_features, ["audio_array", "sampling_rate"], "input_features")
+            .map(set_cols("forced_ac_decoder_ids", lambda _: forced_ac_decoder_ids))
+            .prefetch(prefetch)
+        )
 
     return pipe, num_files
 
@@ -387,74 +435,134 @@ def make_audiofolder(
     train_mini_size: int,
     val_mini_size: int,
     seed: int,
+    encoded: bool,
+    encoded_base_path: str,
     task: str,
 ) -> dict[str, AudioFolder]:
 
     ds = {}
 
-    common_args = dict(
-        caption_columns=[
-            "caption",
-        ],
-        tokenizer=tokenizer,
-        feature_extractor=feature_extractor,
-    )
+    if not encoded:
 
-    ds["train"] = AudioFolder(
-        metadata_path=train_metadata,
-        handle_multiple_captions="explode",
-        shuffle=True,
-        augment_config=augment_config,
-        task=task,
-        **common_args,
-    )
+        common_args = dict(
+            caption_columns=[
+                "caption",
+            ],
+            tokenizer=tokenizer,
+            feature_extractor=feature_extractor,
+        )
 
-    ds["train_mini"] = AudioFolder(
-        metadata_path=train_metadata,
-        handle_multiple_captions="keep_first",
-        shuffle=False,
-        augment_config=augment_config,
-        sample_n=train_mini_size,
-        drop_audio_array=False,
-        load_as_iterable=False,
-        seed=seed,
-        task=task,
-        **common_args,
-    )
+        ds["train"] = AudioFolder(
+            metadata_path=train_metadata,
+            handle_multiple_captions="explode",
+            shuffle=True,
+            augment_config=augment_config,
+            task=task,
+            **common_args,
+        )
 
-    ds["val"] = AudioFolder(
-        metadata_path=val_metadata,
-        handle_multiple_captions="keep_first",
-        shuffle=False,
-        augment_config=None,
-        sample_n=None,
-        seed=seed,
-        task=task,
-        **common_args,
-    )
+        ds["train_mini"] = AudioFolder(
+            metadata_path=train_metadata,
+            handle_multiple_captions="keep_first",
+            shuffle=False,
+            augment_config=augment_config,
+            sample_n=train_mini_size,
+            drop_audio_array=False,
+            load_as_iterable=False,
+            seed=seed,
+            task=task,
+            **common_args,
+        )
 
-    ds["val_mini"] = AudioFolder(
-        metadata_path=val_metadata,
-        handle_multiple_captions="keep_first",
-        shuffle=False,
-        augment_config=None,
-        sample_n=val_mini_size,
-        drop_audio_array=False,
-        load_as_iterable=False,
-        seed=seed,
-        task=task,
-        **common_args,
-    )
+        ds["val"] = AudioFolder(
+            metadata_path=val_metadata,
+            handle_multiple_captions="keep_first",
+            shuffle=False,
+            augment_config=None,
+            sample_n=None,
+            seed=seed,
+            task=task,
+            **common_args,
+        )
 
-    ds["test"] = AudioFolder(
-        metadata_path=test_metadata,
-        handle_multiple_captions="keep_first",
-        shuffle=False,
-        augment_config=None,
-        task=task,
-        **common_args,
-    )
+        ds["val_mini"] = AudioFolder(
+            metadata_path=val_metadata,
+            handle_multiple_captions="keep_first",
+            shuffle=False,
+            augment_config=None,
+            sample_n=val_mini_size,
+            drop_audio_array=False,
+            load_as_iterable=False,
+            seed=seed,
+            task=task,
+            **common_args,
+        )
 
+        ds["test"] = AudioFolder(
+            metadata_path=test_metadata,
+            handle_multiple_captions="keep_first",
+            shuffle=False,
+            augment_config=None,
+            task=task,
+            **common_args,
+        )
+
+    else:
+        common_args = dict(
+            caption_columns=[
+                "caption",
+            ],
+            tokenizer=tokenizer,
+            encoded_base_path=encoded_base_path,
+        )
+
+        ds["train"] = EncodedFolder(
+            metadata_path=train_metadata,
+            handle_multiple_captions="explode",
+            shuffle=True,
+            task=task,
+            **common_args,
+        )
+
+        ds["train_mini"] = EncodedFolder(
+            metadata_path=train_metadata,
+            handle_multiple_captions="keep_first",
+            shuffle=False,
+            sample_n=train_mini_size,
+            load_as_iterable=False,
+            seed=seed,
+            task=task,
+            **common_args,
+        )
+
+        ds["val"] = EncodedFolder(
+            metadata_path=val_metadata,
+            handle_multiple_captions="keep_first",
+            shuffle=False,
+            sample_n=None,
+            seed=seed,
+            task=task,
+            **common_args,
+        )
+
+        ds["val_mini"] = EncodedFolder(
+            metadata_path=val_metadata,
+            handle_multiple_captions="keep_first",
+            shuffle=False,
+            sample_n=val_mini_size,
+            load_as_iterable=False,
+            seed=seed,
+            task=task,
+            **common_args,
+        )
+
+        ds["test"] = EncodedFolder(
+            metadata_path=test_metadata,
+            handle_multiple_captions="keep_first",
+            shuffle=False,
+            task=task,
+            **common_args,
+        )
     return ds
 
 
@@ -462,6 +570,8 @@ def load_dataset_mixture(
     train_metadata: pathlib.Path | str,
     val_metadata: pathlib.Path | str,
     test_metadata: pathlib.Path | str,
+    encoded: bool | False,
+    encoded_base_path: str | None,
     log_preds_num_train: int,
     log_preds_num_valid: int,
     tokenizer: transformers.WhisperTokenizer,
@@ -473,16 +583,18 @@ def load_dataset_mixture(
 
     audiofolders.append(
         audiocap.data.make_audiofolder(
-            train_metadata,
-            val_metadata,
-            test_metadata,
-            tokenizer,
-            feature_extractor,
-            augment_config,
-            log_preds_num_train,
-            log_preds_num_valid,
-            task=task,
+            train_metadata=train_metadata,
+            val_metadata=val_metadata,
+            test_metadata=test_metadata,
+            tokenizer=tokenizer,
+            feature_extractor=feature_extractor,
+            augment_config=augment_config,
+            train_mini_size=log_preds_num_train,
+            val_mini_size=log_preds_num_valid,
             seed=0,
+            encoded=encoded,
+            encoded_base_path=encoded_base_path,
+            task=task,
         )
     )
 
