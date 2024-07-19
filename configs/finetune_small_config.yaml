@@ -1,14 +1,13 @@
 hf_training_args:
   do_train: True
-  do_eval: False
 
-  max_steps: 500
+  max_steps: 100000000
   optim: "adamw_torch"
-  learning_rate: 0.00001
-  warmup_steps: 100
+  learning_rate: 0.000001
+  warmup_steps: 500
 
   per_device_train_batch_size: 6
-  gradient_accumulation_steps: 7
+  gradient_accumulation_steps: 12
   per_device_eval_batch_size: 6
   eval_accumulation_steps: 1
 
@@ -24,19 +23,13 @@ hf_training_args:
 
   fp16: True
 
-  metric_for_best_model: "spider"
-  greater_is_better: True
-
-  load_best_model_at_end: True
   predict_with_generate: True # NEVER TOUCH THIS
   generation_num_beams: 1
   generation_max_length: 80
-  eval_strategy: "steps"
-  eval_steps: 500
 
   save_strategy: "steps"
-  save_steps: 500
-  save_total_limit: 5
+  save_steps: 1000
+  save_total_limit: 100
 
 
 architecture:

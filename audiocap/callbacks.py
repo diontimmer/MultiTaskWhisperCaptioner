@@ -140,6 +140,15 @@ class PredictionLogger(transformers.TrainerCallback):
             for item, pred, label, forced_ac_decoder_ids in zip(
                 iter(self.dataset), all_preds, all_trues, all_forced_ac_decoder_ids
             ):
+                task_id = int(label.split(":")[0].strip().split(">")[-1])  # fuckery
+
+                print(model.task_mapping)
+
+                task = model.task_mapping[task_id]
+
+                label = label.replace(str(task_id), task)
+                pred = pred.replace(str(task_id), task)
+
                 print(
                     f"  FILE_NAME='{item['file_name']}'  WANDB_TABLE={self.log_prefix}  PREFIX='{item['prefix']}'"
                     f"  CAPTION_COLNAME='{item['caption_colname']}  FORCED_AC_DECODER_IDS='{forced_ac_decoder_ids}'"

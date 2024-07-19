@@ -1,8 +1,0 @@
-python \
-    audiocap/train_whisper_supervised.py \
-    --checkpoint-dir-root="/home/diont/audio-captioning/checkpoints" \
-    --dirs="/home/diont/current_datasets/Soundtrack Loops" \
-    --val-dir="/home/diont/current_datasets/caption_val" \
-    --training-config="/home/diont/audio-captioning/configs/finetune_small_config.yaml" \
-    --load-checkpoint="/home/diont/audio-captioning/whisper-small-audio-captioning" \
-    --task="keywords"

@@ -7,6 +7,16 @@ from transformers.models.whisper.tokenization_whisper import TASK_IDS, TO_LANGUA
 
 
 class WhisperForAudioCaptioning(transformers.WhisperForConditionalGeneration):
+    def __init__(self, config):
+        super().__init__(config)
+
+    @property
+    def task_mapping(self):
+        return {v: k for k, v in self.config.task_mapping.items()}
+
+    @property
+    def named_task_mapping(self):
+        return self.config.task_mapping
 
     def forward(
         self,

@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pathlib
 import shutil
-from typing import Optional, Any
+from typing import Optional, Any, List
 
+import pandas as pd
 import transformers
 import wandb
 import torch
@@ -11,7 +12,6 @@ import typer
 import yaml
 import peft
 
-import audiocap.metrics
 import audiocap.data
 import audiocap.callbacks
 import audiocap.models
@@ -29,12 +29,13 @@ def main(
         readable=True,
         help="Path to the directory where checkpoints will be saved",
     ),
-    train_file: pathlib.Path = typer.Option(
+    # train file can be a list of jsonl files or a single jsonl file
+    train_file: List[pathlib.Path] = typer.Option(
         ...,
         dir_okay=False,
         file_okay=True,
         readable=True,
-        help="Path to the training metadata file",
+        help="jsonl file with the training data",
     ),
     training_config: pathlib.Path = typer.Option(
         ...,
@@ -49,10 +50,6 @@ def main(
         file_okay=True,
         readable=True,
         help="Path to checkpoint to initialize the model with",
-    ),
-    task: str = typer.Option(
-        ...,
-        help="Task to train the model on.",
     ),
     encoded: bool = typer.Option(
         False,
@@ -155,14 +152,23 @@ def main(
         f"Number of trained parameters: {tuned_params}/{total_params} = {tuned_params/total_params*100:.2f}%"
     )
 
-    dataset, audiofolders, ds_val_alternatives = audiocap.data.load_dataset_mixture(
-        metadata=train_file,
+    metas = []
+
+    for i, file in enumerate(train_file):
+        metas.append(pd.read_json(file, lines=True))
+
+    print("Task mapping:")
+    for task_id, task in model.task_mapping.items():
+        print(f"  {task}: {task_id}")
+
+    dataset, audiofolders = audiocap.data.load_dataset_mixture(
+        metas=metas,
+        task_mapping=model.task_mapping,
         log_preds_num_train=log_preds_num_train,
         log_preds_num_valid=log_preds_num_valid,
         tokenizer=tokenizer,
         feature_extractor=feature_extractor,
         augment_config=augment_config,
-        task=task,
         encoded=encoded,
         encoded_base_path=encoded_base_path,
     )
@@ -171,7 +177,6 @@ def main(
         for split_name, split in ds.items():
             print(f"{split_name}: {len(split)} audio-caption pairs")
 
-    compute_metrics = audiocap.metrics.CaptioningMetrics(tokenizer, ds_val_alternatives)
     collator = audiocap.data.DataCollatorAudioSeq2SeqWithPadding(
         tokenizer, feature_extractor
     )
@@ -267,9 +272,7 @@ def main(
         model=model,
         tokenizer=tokenizer,
         data_collator=collator,
-        compute_metrics=compute_metrics,
         train_dataset=dataset["train"],
-        eval_dataset=dataset["val"],
         args=training_args,
         callbacks=callbacks,
     )

@@ -12,21 +12,7 @@ feature_extractor = WhisperFeatureExtractor(device="cpu")
 # Load metadata
 output_dir = "/data/datasets/pixabay_encoded"
 paths = [
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_mood_val.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_mood_test.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_mood_train.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_movement_val.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_movement_test.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_movement_train.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_theme_val.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_theme_test.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_theme_train.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_tags_val.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_tags_test.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_tags_train.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_genre_val.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_genre_test.jsonl",
-    "/chungus/disk1/datasets/pixabay/captioning_jsons/metadata_genre_train.jsonl",
+    "/chungus/disk1/datasets/pixabay/captioning_jsons/multitask_metadata.jsonl",
 ]
 extract_seconds = 25
 target_sample_rate = 16000
