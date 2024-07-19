@@ -3,7 +3,6 @@ from __future__ import annotations
 import os
 import sys
 import pathlib
-import functools
 import dataclasses
 import collections
 import multiprocessing

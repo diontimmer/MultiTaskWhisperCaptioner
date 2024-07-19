@@ -8,8 +8,6 @@ hf_training_args:
 
   per_device_train_batch_size: 6
   gradient_accumulation_steps: 12
-  per_device_eval_batch_size: 6
-  eval_accumulation_steps: 1
 
   dataloader_num_workers: 16
   dataloader_pin_memory: True
