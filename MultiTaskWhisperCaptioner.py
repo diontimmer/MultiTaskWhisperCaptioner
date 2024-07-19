@@ -114,7 +114,9 @@ class MultiTaskWhisperCaptioner:
 
 
 def main(
-    checkpoint: str = typer.Option(..., help="Path to model checkpoint"),
+    checkpoint: str = typer.Option(
+        ..., help="Path to model checkpoint or name of huggingface repo"
+    ),
     audio: str = typer.Option(..., help="Path to audio file(s)"),
     output: str = typer.Option(
         ..., help="Output type ('print' or 'file') for processed audio"
