@@ -174,7 +174,8 @@ class CaptionerFolder:
                 pipe = pipe.map(del_cols("audio_array"))
 
         # get all caption keys
-        caption_keys = [key for key in self.meta.columns if key != "file_name"]
+        filtered_keys = ["file_name", "encoded_filename"]
+        caption_keys = [key for key in self.meta.columns if key not in filtered_keys]
 
         def assign_caption(row):
             if self.task == "RANDOM":
