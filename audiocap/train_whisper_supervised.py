@@ -55,10 +55,6 @@ def main(
         False,
         help="Whether the dataset is already encoded",
     ),
-    encoded_base_path: Optional[pathlib.Path] = typer.Option(
-        None,
-        help="Base path to the encoded files",
-    ),
     wandb_group: Optional[str] = typer.Option(None, help="Wandb group"),
 ) -> None:
 
@@ -170,7 +166,6 @@ def main(
         feature_extractor=feature_extractor,
         augment_config=augment_config,
         encoded=encoded,
-        encoded_base_path=encoded_base_path,
     )
 
     for ds in audiofolders:

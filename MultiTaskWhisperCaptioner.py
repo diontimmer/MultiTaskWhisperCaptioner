@@ -54,7 +54,9 @@ class MultiTaskWhisperCaptioner:
         ).labels
         return style_prefix_tokens
 
-    def process_audio_files(self, audio_files, tasks=["tags"], batch_size=1):
+    def process_audio_files(
+        self, audio_files, tasks=["tags"], batch_size=1, return_as_tags=True
+    ):
 
         if not isinstance(audio_files, list):
             audio_files = [audio_files]
@@ -101,7 +103,12 @@ class MultiTaskWhisperCaptioner:
                 for pred_text, file_path in zip(pred_texts, batch_files):
                     if file_path not in predictions:
                         predictions[file_path] = {}
-                    predictions[file_path][task] = pred_text.replace(prefix, "")
+
+                    if return_as_tags:
+                        pred_text = pred_text.replace(prefix, "").split(", ")
+                        predictions[file_path][task] = list(dict.fromkeys(pred_text))
+                    else:
+                        predictions[file_path][task] = pred_text.replace(prefix, "")
 
         return predictions
 
@@ -117,6 +124,7 @@ def main(
         ["tags"], help="List of tasks to generate captions for"
     ),
     batch_size: int = typer.Option(1, help="Batch size for processing audio files"),
+    return_as_tags: bool = typer.Option(True, help="Return captions as tags"),
 ):
     generator = MultiTaskWhisperCaptioner(checkpoint=checkpoint, device=device)
 
@@ -126,7 +134,7 @@ def main(
         audiofiles = [audio]
 
     captions = generator.process_audio_files(
-        audiofiles, tasks=task, batch_size=batch_size
+        audiofiles, tasks=task, batch_size=batch_size, return_as_tags=return_as_tags
     )
     for audiofile, caption in captions.items():
         if output == "file":

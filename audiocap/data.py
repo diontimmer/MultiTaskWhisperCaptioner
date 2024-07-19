@@ -17,8 +17,8 @@ import torchdata.datapipes as dp
 import transformers
 import audiocap
 import torchaudio
-from col_ops import set_cols, del_cols, explode_col, rename_col
-from preprocessing import PrepareLabels, PreprocessAudio
+from audiocap.col_ops import set_cols, del_cols
+from audiocap.preprocessing import PrepareLabels, PreprocessAudio
 
 
 def create_prefix(task) -> str:
@@ -55,7 +55,6 @@ class CaptionerFolder:
     prepare_caption: Callable | None = None
     augment_config: audiocap.augment.AugmentConfig | None = None
     encoded: bool = False
-    encoded_base_path: str | None = None
     shuffle_buffer_size: int = 20
     prefetch: int = 10
     drop_audio_array: bool = True
@@ -90,11 +89,7 @@ class CaptionerFolder:
 
         def load_encoded_features(row):
             try:
-                filename = os.path.splitext(os.path.basename(row["file_name"]))[0]
-                encoded_filename = os.path.join(
-                    self.encoded_base_path, f"{filename}_whisper.npy"
-                )
-                encoded = np.load(encoded_filename)
+                encoded = np.load(row["encoded_filename"])
                 encoded = encoded.squeeze()
                 return encoded
             except Exception as e:
@@ -235,97 +230,6 @@ class CaptionerFolder:
         return len(self.meta)
 
 
-def load_audios_for_prediction(
-    src: pathlib.Path | str,
-    tokenizer: transformers.WhisperTokenizer,
-    feature_extractor: transformers.WhisperFeatureExtractor,
-    task: str,
-    recursive: bool,
-    suffixes: tuple[str, ...] = ("mp3", "wav"),
-    take_n: int | None = None,
-    prefetch: int = 10,
-    encoded: bool = False,
-    encoded_base_path: str | None = None,
-) -> tuple[dp.iter.IterDataPipe, int]:
-
-    src = pathlib.Path(src)
-
-    if src.is_file():
-        paths = [src]
-    elif recursive:
-        paths = [
-            path
-            for path in src.glob("**/*")
-            if path.is_file() and path.suffix.strip(".") in suffixes
-        ]
-    else:
-        paths = [
-            path
-            for path in src.iterdir()
-            if path.is_file() and path.suffix.strip(".") in suffixes
-        ]
-
-    paths.sort()
-    if take_n is not None:
-        paths = paths[:take_n]
-
-    num_files = len(paths)
-
-    prepare_labels = PrepareLabels(tokenizer)
-    extract_features = PreprocessAudio(feature_extractor)
-    sr = feature_extractor.sampling_rate
-    prefix = create_prefix(task)
-    _, forced_ac_decoder_ids = prepare_labels(prefix, "")
-
-    pipe: dp.iter.IterDataPipe
-    pipe = dp.iter.IterableWrapper([{"path": path} for path in paths], deepcopy=False)
-
-    def load_encoded_features(path):
-        try:
-            filename = os.path.splitext(os.path.basename(path))[0]
-            encoded_filename = os.path.join(
-                encoded_base_path, f"{filename}_whisper.npy"
-            )
-            encoded = np.load(encoded_filename)
-            return encoded
-        except Exception as e:
-            print(f"Error loading {encoded_filename}: {e}", file=sys.stderr, flush=True)
-            return None
-
-    if encoded:
-        pipe = (
-            pipe.sharding_filter()
-            .map(set_cols("file_name", lambda x: pathlib.Path(x["path"]).name))
-            .map(
-                set_cols(
-                    "input_features", lambda row: load_encoded_features(row["path"])
-                )
-            )
-            .filter(lambda row: row["input_features"] is not None)
-            .map(del_cols("path"))
-            .map(set_cols("forced_ac_decoder_ids", lambda _: forced_ac_decoder_ids))
-            .prefetch(prefetch)
-        )
-    else:
-        pipe = (
-            pipe.sharding_filter()
-            .map(set_cols("file_name", lambda x: pathlib.Path(x["path"]).name))
-            .map(
-                set_cols(
-                    ("audio_array", "sampling_rate"),
-                    lambda row: load_and_process_audio(row["path"], sr=sr),
-                )
-            )
-            .map(del_cols("path"))
-            .filter(lambda row: row["audio_array"] is not None)
-            .map(extract_features, ["audio_array", "sampling_rate"], "input_features")
-            .map(set_cols("forced_ac_decoder_ids", lambda _: forced_ac_decoder_ids))
-            .prefetch(prefetch)
-        )
-
-    return pipe, num_files
-
-
 def make_audiofolder(
     meta: pd.DataFrame,
     task_mapping: dict[str, int],
@@ -336,7 +240,6 @@ def make_audiofolder(
     val_mini_size: int,
     seed: int,
     encoded: bool,
-    encoded_base_path: str,
 ) -> dict[str, CaptionerFolder]:
 
     ds = {}
@@ -356,7 +259,6 @@ def make_audiofolder(
         tokenizer=tokenizer,
         feature_extractor=feature_extractor,
         encoded=encoded,
-        encoded_base_path=encoded_base_path,
         task_mapping=task_mapping,
     )
 
@@ -411,7 +313,6 @@ def load_dataset_mixture(
     metas: list[pd.DataFrame],
     task_mapping: dict[str, int],
     encoded: bool | False,
-    encoded_base_path: str | None,
     log_preds_num_train: int,
     log_preds_num_valid: int,
     tokenizer: transformers.WhisperTokenizer,
@@ -433,7 +334,6 @@ def load_dataset_mixture(
                 val_mini_size=log_preds_num_valid,
                 seed=0,
                 encoded=encoded,
-                encoded_base_path=encoded_base_path,
             )
         )
 
