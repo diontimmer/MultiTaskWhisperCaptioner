@@ -5,17 +5,6 @@ This repository contains the code for the Whisper Multitask Audio Captioner, a t
 
 The model is based on the Whisper architecture and is capable of generating captions for various audio-related tasks such as general descriptions, musical genres, emotional feelings, audio pace, and usage themes.
 
-## Features
-
-    Model Architecture: Whisper encoder-decoder transformer.
-    Based on: https://github.com/prompteus/audio-captioning
-    Supported Tasks:
-        General descriptions
-        Musical genres
-        Emotional feelings
-        Audio pace and expression
-        Audio usage themes
-
 ## Usage
 
 The model expects an audio clip (up to 30s) to the encoder as an input and information about caption style as forced prefix to the decoder.
