@@ -52,25 +52,37 @@ def process_and_save_audio(
         return None
 
 
-def process_metadata_file(metadata_path):
+def process_metadata_file(
+    metadata_path, extract_seconds, target_sample_rate, feature_extractor, output_dir
+):
     with jsonlines.open(metadata_path) as reader:
         lines = list(reader)
         print(f"Processing {len(lines)} files")
 
     prog = tqdm(total=len(lines))
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
         for line in lines:
-            executor.submit(process_and_save_audio, line, prog)
+            executor.submit(
+                process_and_save_audio,
+                line,
+                prog,
+                extract_seconds,
+                target_sample_rate,
+                feature_extractor,
+                output_dir,
+            )
 
 
 def update_metadata_file(metadata_path, encoded_path):
     new_filename = metadata_path.replace(".jsonl", "_encoded.jsonl")
     encoded_jsons = [f for f in os.listdir(encoded_path) if f.endswith(".json")]
+
     with jsonlines.open(metadata_path) as reader:
         lines = list(reader)
         print(f"Processing {len(lines)} files")
-    for encoded_json in encoded_jsons:
+    for encoded_json in tqdm(encoded_jsons):
+        encoded_json = os.path.join(encoded_path, encoded_json)
         with open(encoded_json) as f:
             data = json.load(f)
         for line in lines:
@@ -79,6 +91,8 @@ def update_metadata_file(metadata_path, encoded_path):
                     "_whisper.json", "_whisper.npy"
                 )
                 break
+
+    print(f"Writing to {new_filename}")
     with jsonlines.open(new_filename, "w") as writer:
         for line in lines:
             writer.write(line)
@@ -88,6 +102,7 @@ def update_metadata_file(metadata_path, encoded_path):
 app = typer.Typer(pretty_exceptions_enable=True)
 
 
+@app.command()
 def main(
     metadata_path: List[str] = typer.Option(
         ...,
@@ -117,9 +132,15 @@ def main(
 
     paths = metadata_path
 
+    os.makedirs(output_dir, exist_ok=True)
+
     for path in paths:
         print(f"Processing {path}")
         process_metadata_file(
             path, extract_seconds, target_sample_rate, feature_extractor, output_dir
         )
         update_metadata_file(path, output_dir)
+
+
+if __name__ == "__main__":
+    app()

@@ -132,6 +132,8 @@ def main(
 
     if os.path.isdir(audio):
         audiofiles = [os.path.join(audio, f) for f in os.listdir(audio)]
+        # only wav and mp3 files
+        audiofiles = [f for f in audiofiles if f.endswith(".wav") or f.endswith(".mp3")]
     else:
         audiofiles = [audio]
 
